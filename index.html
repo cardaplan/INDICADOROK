@@ -1667,19 +1667,42 @@
             return data;
         }
 
+        // CSV fetch cache with coalescing
+        const csvCache = new Map();
+        const pendingCsvFetches = new Map();
+
+        async function fetchCsvTextCached(url, ttlMs = 60000) {
+            try {
+                const now = Date.now();
+                const cached = csvCache.get(url);
+                if (cached && (now - cached.fetchedAt) < ttlMs) {
+                    return cached.text;
+                }
+                if (pendingCsvFetches.has(url)) {
+                    return await pendingCsvFetches.get(url);
+                }
+                const fetchPromise = (async () => {
+                    const response = await fetch(url, { cache: 'no-store' });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const text = await response.text();
+                    csvCache.set(url, { text, fetchedAt: Date.now() });
+                    pendingCsvFetches.delete(url);
+                    return text;
+                })();
+                pendingCsvFetches.set(url, fetchPromise);
+                return await fetchPromise;
+            } catch (e) {
+                pendingCsvFetches.delete(url);
+                throw e;
+            }
+        }
+
         // Function to load CSV data
         async function loadCSVData(url) {
             try {
                 debugLog('Loading CSV from:', url);
                 
-                const response = await fetch(url);
-                debugLog('Response status:', response.status);
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const csvText = await response.text();
+                const csvText = await fetchCsvTextCached(url);
                 debugLog('CSV loaded:', csvText.length, 'chars');
                 
                 const parsedData = parseCSV(csvText);
@@ -6590,8 +6613,7 @@
         function checkIfOpenAtTime(dayOfWeek, timeInMinutes) {
             return new Promise(async (resolve) => {
                 try {
-                    const response = await fetch(HOURS_CSV_URL);
-                    const csvText = await response.text();
+                    const csvText = await fetchCsvTextCached(HOURS_CSV_URL);
                     const lines = csvText.trim().split('\n');
                     
                     // Procurar pelo dia da semana (começando da linha 1, pois linha 0 é cabeçalho)
@@ -6648,8 +6670,7 @@
          */
         async function getNextOpenTime() {
             try {
-                const response = await fetch(HOURS_CSV_URL);
-                const csvText = await response.text();
+                const csvText = await fetchCsvTextCached(HOURS_CSV_URL);
                 const lines = csvText.trim().split('\n');
                 const currentTime = getCurrentDateInTimezone();
                 const currentDay = currentTime.getDay();
@@ -11328,8 +11349,7 @@
         async function updateOperatingHours() {
             try {
                 // Fetch CSV data directly for real-time updates
-                const response = await fetch(HOURS_CSV_URL);
-                const csvText = await response.text();
+                const csvText = await fetchCsvTextCached(HOURS_CSV_URL);
                 
                 // Parse CSV manually
                 const lines = csvText.trim().split('\n');
@@ -11644,9 +11664,8 @@
             document.body.style.overflow = 'hidden';
             
             try {
-                // Fetch CSV data directly
-                const response = await fetch(HOURS_CSV_URL);
-                const csvText = await response.text();
+                // Fetch CSV data diretamente
+                const csvText = await fetchCsvTextCached(HOURS_CSV_URL);
                 
                 debugLog('CSV loaded successfully:', csvText.substring(0, 200));
                 
