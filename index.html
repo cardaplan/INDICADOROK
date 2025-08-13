@@ -3039,6 +3039,10 @@
                 debugLog('🎟️ Loading coupons data...');
                 const couponsPromise = loadCSVData(COUPONS_CSV_URL);
 
+                // Dê prioridade de processamento ao hoursData (para status Aberto/Fechado)
+                // sem alterar a ordem das definições (apenas processamento imediato após resolver)
+                hoursPromise.then(data => { hoursData = data; try { updateOperatingHours(); updateOpenStatusIndicator(); } catch(_){} });
+
                 // Await and process results in the original sequence
                 categoriesData = await categoriesPromise;
                 updateProgress(40);
@@ -3048,6 +3052,8 @@
 
                 hoursData = await hoursPromise;
                 debugLog('Hours data loaded:', hoursData.length, 'entries');
+                // Garantir atualização imediata do indicador
+                try { updateOperatingHours(); updateOpenStatusIndicator(); } catch(_){}
                 
                 if (hoursData.length > 0) {
                     // Inicializar timezone global
@@ -3112,11 +3118,11 @@
 
                 infoLog('Data loaded successfully:', { categoriesData, menuData });
                 
-                // Hide preloader and initialize app
+                // Hide preloader and initialize app rapidamente
                 setTimeout(() => {
                     hidePreloader();
                     initializeApp();
-                }, 500);
+                }, 100);
 
             } catch (error) {
                 errorLog('Error loading data:', error);
@@ -7259,6 +7265,24 @@
         
         // Initialize everything
         document.addEventListener('DOMContentLoaded', function() {
+            // Preaquecer (prewarm) downloads CSV em paralelo sem bloquear a lógica
+            try {
+                fetchCsvTextCached(CONFIG_CSV_URL);
+                fetchCsvTextCached(HOURS_CSV_URL);
+                fetchCsvTextCached(CATEGORIES_CSV_URL);
+                fetchCsvTextCached(MENU_CSV_URL);
+                fetchCsvTextCached(NEIGHBORHOODS_CSV_URL);
+                fetchCsvTextCached(COUPONS_CSV_URL);
+            } catch (e) { /* silencioso */ }
+
+            // Atualizar indicadores de horário o quanto antes
+            try {
+                initializeGlobalTimezone();
+                updateOperatingHours();
+                updateOpenStatusIndicator();
+            } catch (e) { /* silencioso */ }
+
+            // Carregar dados principais
             loadAllData(); // This will load CSV data and then call initializeApp()
         });
         
@@ -11940,6 +11964,7 @@
         
         // Atualizar status na inicialização (após carregar config)
         document.addEventListener('DOMContentLoaded', () => {
+            // já acionado antecipadamente acima; manter atualização após 2s
             setTimeout(updateOpenStatusIndicator, 2000); // Aguardar 2s para config carregar
         });
 
